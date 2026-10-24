@@ -1,3 +1,6 @@
+CREATE EXTENSION IF NOT EXISTS "citext";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email CITEXT UNIQUE NOT NULL,
@@ -80,12 +83,24 @@ CREATE TABLE IF NOT EXISTS group_memberships (
   UNIQUE (group_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS media_assets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind VARCHAR(24) NOT NULL CHECK (kind IN ('image', 'video', 'audio')),
+  mime_type TEXT,
+  storage_ref TEXT NOT NULL,
+  bytes BIGINT,
+  width INT,
+  height INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   body TEXT,
-  media_id UUID,
+  media_id UUID REFERENCES media_assets(id) ON DELETE SET NULL,
   kind VARCHAR(24) NOT NULL DEFAULT 'text' CHECK (kind IN ('text', 'image', 'video', 'audio', 'system')),
   expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -96,7 +111,7 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS stories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  media_id UUID,
+  media_id UUID REFERENCES media_assets(id) ON DELETE SET NULL,
   caption TEXT,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -158,18 +173,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   target_type TEXT,
   target_id UUID,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS media_assets (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  kind VARCHAR(24) NOT NULL CHECK (kind IN ('image', 'video', 'audio')),
-  mime_type TEXT,
-  storage_ref TEXT NOT NULL,
-  bytes BIGINT,
-  width INT,
-  height INT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
