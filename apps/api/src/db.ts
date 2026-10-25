@@ -1,5 +1,7 @@
-import { Pool } from 'pg';
+import pg, { QueryResultRow } from 'pg';
 import { env } from './config.js';
+
+const { Pool } = pg;
 
 export const pool = new Pool({
   connectionString: env.DATABASE_URL,
@@ -8,7 +10,7 @@ export const pool = new Pool({
   connectionTimeoutMillis: 5000
 });
 
-export async function query<T = Record<string, unknown>>(text: string, params: unknown[] = []) {
+export async function query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
   const result = await pool.query<T>(text, params);
   return result.rows;
 }
