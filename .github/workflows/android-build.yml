@@ -42,19 +42,32 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK components
         shell: bash
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.1.10909125"
+          # GitHub-hosted ubuntu-latest runners ship the Android SDK at
+          # $ANDROID_SDK_ROOT (alias $ANDROID_HOME). The cmdline-tools are
+          # already present under cmdline-tools/latest/bin/. We use that
+          # absolute path so we are never affected by whatever the shell PATH
+          # resolves 'sdkmanager' to (which can be a stale versioned copy).
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+
+          # Accept all licenses non-interactively.
+          yes | "$SDKMANAGER" --licenses || true
+
+          # Install exactly the packages the project needs.
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;26.1.10909125"
 
       - name: Configure local.properties for Gradle
         shell: bash
         run: |
           mkdir -p apps/mobile/android
+          # Write the SDK path that Gradle reads; use the canonical env var.
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > apps/mobile/android/local.properties
 
       - name: Setup Gradle
