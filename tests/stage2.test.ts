@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { validateMediaUpload } from '../apps/api/src/services/storage.js';
-import { getDecoyConversations } from '../apps/api/src/services/decoy.ts';
+import { getDecoyConversations } from '../apps/api/src/services/decoy.js';
 
 describe('Stage 2 Messaging and Safety Boundaries', () => {
   it('validates valid photo media uploads', () => {
