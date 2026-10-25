@@ -3,10 +3,16 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
-    // npm workspaces hoists all packages to the repo root node_modules/.
-    // From apps/mobile/android/app/, the repo root is four levels up.
-    root = file("../../../../")
+    // `root` = the JS app directory where package.json and src/ live.
+    // react-native config must run from here to find the android project.
+    // From apps/mobile/android/app/ -> apps/mobile/ is two levels up.
+    root = file("../../")
+
+    // `reactNativeDir` = where the react-native npm package is installed.
+    // npm workspaces hoists it to the repo root node_modules/.
+    // From apps/mobile/android/app/ -> repo root is four levels up.
     reactNativeDir = file("../../../../node_modules/react-native")
+
     autolinkLibrariesWithApp()
 }
 
