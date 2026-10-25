@@ -6,7 +6,6 @@ plugins {
 }
 
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
-    ex.reactNativeDir = file("../../../node_modules/react-native")
     ex.autolinkLibrariesFromCommand()
 }
 
