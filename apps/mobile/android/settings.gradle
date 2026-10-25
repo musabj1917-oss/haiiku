@@ -1,6 +1,9 @@
 pluginManagement { includeBuild("../../../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    // Monorepo: JS project root is apps/mobile, two levels up from android/
+    ex.autolinkLibrariesFromCommand("node", ["../../../node_modules/.bin/react-native", "config"], new File(rootDir, "../../"))
+}
 rootProject.name = 'HaikuMessenger'
 include ':app'
 includeBuild('../../../node_modules/@react-native/gradle-plugin')
