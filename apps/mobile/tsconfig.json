@@ -8,7 +8,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "typeRoots": ["../../node_modules/@types", "node_modules/@types"]
+    "typeRoots": ["../../node_modules/@types", "node_modules/@types"],
+    "types": ["react"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
