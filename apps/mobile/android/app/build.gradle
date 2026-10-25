@@ -3,6 +3,10 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
+    // Monorepo: node_modules is hoisted to the repo root, not apps/mobile/.
+    // Point the RN Gradle plugin at the repo root so it finds react-native there.
+    root = file("../../../../")
+    reactNativeDir = file("../../../../node_modules/react-native")
     autolinkLibrariesWithApp()
 }
 
