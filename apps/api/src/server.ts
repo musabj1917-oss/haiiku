@@ -4,17 +4,41 @@ import helmet from 'helmet';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { query } from './db.js';
 import { env } from './config.js';
-import { validateBody, requireAuth } from './middleware/auth.js';
+import { validateBody, requireAuth, requireAdmin } from './middleware/auth.js';
 import { registerSchema, loginSchema, googleLinkSchema } from './validation.js';
 import { logAuditEvent } from './services/audit.js';
+import { verifyDecoyLogin, setupDecoyPassword, getDecoyConversations } from './services/decoy.js';
+import { getUserProfile, updateProfile, getDiscoverPeople } from './services/profile.js';
+import { blockUser, unblockUser, submitReport } from './services/safety.js';
+import { sendPrivateMessage, editMessage, deleteMessage } from './services/messaging.js';
+import { createGroup, createGroupInviteLink, requestJoinViaLink, handleJoinRequest, removeGroupMember } from './services/groups.js';
+import { createStory, getStoriesFeed, replyToStory, deleteStory } from './services/stories.js';
+import { initiateVoiceCall, updateVoiceCallStatus } from './services/calls.js';
+import {
+  getAdminActiveMessages,
+  getAdminUsersList,
+  setAdminUserStatus,
+  getAdminReportsList,
+  resolveAdminReport,
+  getAdminGroupsList,
+  getAdminAuditLogs,
+  getAdminSystemMetrics
+} from './services/admin.js';
 
 const app = express();
 
-app.use(helmet());
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
+
+// Serve Static Admin Dashboard Frontend
+app.use('/admin', express.static(path.join(__dirname, '../public/admin')));
 
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -24,7 +48,7 @@ const authLimiter = rateLimit({
 
 app.use('/api/auth', authLimiter);
 
-// 1. Email/Password Registration
+// 1. Registration
 app.post('/api/auth/register', validateBody(registerSchema), async (req, res) => {
   const { email, password, firstName, lastName, dateOfBirth } = req.body;
 
@@ -35,10 +59,10 @@ app.post('/api/auth/register', validateBody(registerSchema), async (req, res) =>
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = await query<{ id: string; email: string; first_name: string; last_name: string }>(
+    const result = await query<{ id: string; email: string; first_name: string; last_name: string; is_admin: boolean }>(
       `INSERT INTO users (email, password_hash, first_name, last_name, date_of_birth)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, email, first_name, last_name`,
+       RETURNING id, email, first_name, last_name, is_admin`,
       [email, passwordHash, firstName, lastName, dateOfBirth]
     );
 
@@ -54,7 +78,8 @@ app.post('/api/auth/register', validateBody(registerSchema), async (req, res) =>
         id: user.id,
         email: user.email,
         firstName: user.first_name,
-        lastName: user.last_name
+        lastName: user.last_name,
+        isAdmin: user.is_admin
       }
     });
   } catch (err) {
@@ -63,13 +88,19 @@ app.post('/api/auth/register', validateBody(registerSchema), async (req, res) =>
   }
 });
 
-// 2. Email/Password Login
+// 2. Login (with Decoy credential check)
 app.post('/api/auth/login', validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const users = await query<{ id: string; email: string; password_hash: string | null; first_name: string; last_name: string }>(
-      'SELECT id, email, password_hash, first_name, last_name FROM users WHERE email = $1 AND deleted_at IS NULL',
+    // First check if it matches decoy password
+    const decoyResult = await verifyDecoyLogin(email, password);
+    if (decoyResult) {
+      return res.status(200).json(decoyResult);
+    }
+
+    const users = await query<{ id: string; email: string; password_hash: string | null; first_name: string; last_name: string; is_admin: boolean }>(
+      'SELECT id, email, password_hash, first_name, last_name, is_admin FROM users WHERE email = $1 AND deleted_at IS NULL',
       [email]
     );
 
@@ -92,7 +123,8 @@ app.post('/api/auth/login', validateBody(loginSchema), async (req, res) => {
         id: user.id,
         email: user.email,
         firstName: user.first_name,
-        lastName: user.last_name
+        lastName: user.last_name,
+        isAdmin: user.is_admin
       }
     });
   } catch (err) {
@@ -101,7 +133,7 @@ app.post('/api/auth/login', validateBody(loginSchema), async (req, res) => {
   }
 });
 
-// 3. Google OAuth Link / Authentication
+// 3. Google Auth
 app.post('/api/auth/google', validateBody(googleLinkSchema), async (req, res) => {
   const { googleUserId, email, firstName, lastName, dateOfBirth } = req.body;
 
@@ -158,44 +190,84 @@ app.post('/api/auth/google', validateBody(googleLinkSchema), async (req, res) =>
   }
 });
 
-// Protected Profile
-app.get('/api/me', requireAuth, async (req, res) => {
+// Admin Dashboard Protected Endpoints
+app.get('/api/admin/messages', requireAdmin, async (_req, res) => {
   try {
-    const users = await query<{ id: string; email: string; first_name: string; last_name: string; date_of_birth: string }>(
-      'SELECT id, email, first_name, last_name, date_of_birth FROM users WHERE id = $1',
-      [req.user?.id]
-    );
-
-    if (users.length === 0) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    return res.status(200).json({ user: users[0] });
+    const messages = await getAdminActiveMessages();
+    return res.status(200).json({ messages });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to retrieve profile.' });
+    return res.status(500).json({ error: 'Failed to fetch active messages.' });
   }
 });
 
-// Account Deletion Request
-app.post('/api/account/delete', requireAuth, async (req, res) => {
-  const { reason } = req.body;
-  const userId = req.user?.id;
-
+app.get('/api/admin/users', requireAdmin, async (_req, res) => {
   try {
-    await query(
-      `INSERT INTO account_deletion_requests (user_id, status, scheduled_for, reason)
-       VALUES ($1, 'requested', NOW() + INTERVAL '30 days', $2)`,
-      [userId, reason || 'User requested deletion']
-    );
-
-    await logAuditEvent(userId!, 'user.account_deletion_requested', 'user', userId, { reason });
-
-    return res.status(200).json({
-      message: 'Account deletion requested. Your account is scheduled for deletion in 30 days.'
-    });
+    const users = await getAdminUsersList();
+    return res.status(200).json({ users });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to process account deletion request.' });
+    return res.status(500).json({ error: 'Failed to fetch user list.' });
   }
+});
+
+app.post('/api/admin/users/status', requireAdmin, async (req, res) => {
+  const { targetUserId, isActive } = req.body;
+  try {
+    await setAdminUserStatus(req.user!.id, targetUserId, isActive);
+    return res.status(200).json({ message: 'User status updated successfully.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update user status.' });
+  }
+});
+
+app.get('/api/admin/reports', requireAdmin, async (_req, res) => {
+  try {
+    const reports = await getAdminReportsList();
+    return res.status(200).json({ reports });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch report list.' });
+  }
+});
+
+app.post('/api/admin/reports/resolve', requireAdmin, async (req, res) => {
+  const { reportId, status, notes } = req.body;
+  try {
+    await resolveAdminReport(req.user!.id, reportId, status, notes);
+    return res.status(200).json({ message: 'Report resolved.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to resolve report.' });
+  }
+});
+
+app.get('/api/admin/groups', requireAdmin, async (_req, res) => {
+  try {
+    const groups = await getAdminGroupsList();
+    return res.status(200).json({ groups });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch groups.' });
+  }
+});
+
+app.get('/api/admin/audit-logs', requireAdmin, async (_req, res) => {
+  try {
+    const logs = await getAdminAuditLogs();
+    return res.status(200).json({ logs });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch audit logs.' });
+  }
+});
+
+app.get('/api/admin/metrics', requireAdmin, async (_req, res) => {
+  try {
+    const metrics = await getAdminSystemMetrics();
+    return res.status(200).json({ metrics });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch system metrics.' });
+  }
+});
+
+// Decoy Conversations endpoint
+app.get('/api/decoy/conversations', requireAuth, (_req, res) => {
+  return res.status(200).json({ conversations: getDecoyConversations() });
 });
 
 app.get('/health', (_req, res) => {
