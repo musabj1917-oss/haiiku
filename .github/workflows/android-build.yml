@@ -54,9 +54,18 @@ jobs:
       - name: Install Android SDK packages
         shell: bash
         run: |
+          set -euxo pipefail
+
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses || true
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found at $SDKMANAGER"
+            ls -la "$ANDROID_SDK_ROOT" || true
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" \
+            "cmdline-tools;latest" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
@@ -66,12 +75,15 @@ jobs:
       - name: Write local.properties
         run: printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > apps/mobile/android/local.properties
 
-      - name: Debug react-native config output
+      - name: Validate React Native app config
         working-directory: apps/mobile
+        env:
+          PROJECT_ROOT: ${{ github.workspace }}/apps/mobile
         run: |
-          echo "--- react-native config output ---"
-          node ../../node_modules/.bin/react-native config 2>&1 || true
-          echo "--- end react-native config ---"
+          set -euxo pipefail
+          test -f package.json
+          test -f react-native.config.js
+          node ../../node_modules/.bin/react-native config --verbose
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -83,7 +95,10 @@ jobs:
         working-directory: apps/mobile/android
         env:
           PROJECT_ROOT: ${{ github.workspace }}/apps/mobile
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          set -euxo pipefail
+          export PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)/..}"
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK exists
         run: |
