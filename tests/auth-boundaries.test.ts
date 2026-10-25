@@ -1,46 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
+import { registerSchema } from '../apps/api/src/validation.js';
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  dateOfBirth: z.string().refine((value) => {
-    const dob = new Date(value);
-    if (Number.isNaN(dob.getTime())) return false;
-    const age = new Date().getFullYear() - dob.getFullYear();
-    const monthDelta = new Date().getMonth() - dob.getMonth();
-    return age > 13 || (age === 13 && monthDelta >= 0);
-  }, 'Age must be 13+')
-});
+function birthDateAtAge(age: number): string {
+  const today = new Date();
+  const dob = new Date(today.getFullYear() - age, today.getMonth(), today.getDate());
+  return `${dob.getFullYear()}-${String(dob.getMonth() + 1).padStart(2, '0')}-${String(dob.getDate()).padStart(2, '0')}`;
+}
+
+function validRegistration(dateOfBirth: string) {
+  return {
+    email: 'student@example.com',
+    password: 'password123',
+    firstName: 'Haiku',
+    lastName: 'User',
+    dateOfBirth
+  };
+}
 
 describe('Authentication boundaries', () => {
-  it('rejects users under 13', () => {
-    const result = registerSchema.safeParse({
-      email: 'child@example.com',
-      password: 'password123',
-      dateOfBirth: '2015-01-01'
-    });
-
-    expect(result.success).toBe(false);
+  it('rejects users younger than 13', () => {
+    expect(registerSchema.safeParse(validRegistration(birthDateAtAge(12))).success).toBe(false);
   });
 
-  it('accepts valid 13-year-old registrations', () => {
-    const result = registerSchema.safeParse({
-      email: 'teen@example.com',
-      password: 'password123',
-      dateOfBirth: '2012-12-31'
-    });
-
-    expect(result.success).toBe(true);
+  it('accepts users who have reached age 13', () => {
+    expect(registerSchema.safeParse(validRegistration(birthDateAtAge(13))).success).toBe(true);
   });
 
   it('rejects invalid email input', () => {
-    const result = registerSchema.safeParse({
-      email: 'not-an-email',
-      password: 'password123',
-      dateOfBirth: '2010-01-01'
-    });
+    expect(registerSchema.safeParse({ ...validRegistration(birthDateAtAge(20)), email: 'not-an-email' }).success).toBe(false);
+  });
 
-    expect(result.success).toBe(false);
+  it('rejects malformed dates', () => {
+    expect(registerSchema.safeParse(validRegistration('not-a-date')).success).toBe(false);
   });
 });
